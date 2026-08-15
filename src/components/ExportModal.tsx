@@ -24,9 +24,7 @@ import { LogEntry } from '../types';
 import { exportToExcel, exportToPdf, exportToMarkdown, exportCodebookForAtlasTi } from '../lib/exportUtils';
 import {
   DEFAULT_SPREADSHEET_ID,
-  SPREADSHEET_URL,
-  SERVICE_ACCOUNT_EMAIL,
-  OWNER_ACCOUNT_EMAIL,
+  getSpreadsheetUrl,
   generateGoogleSheetsTSV,
   requestGoogleAccessToken,
   syncWithGoogleSheets,
@@ -134,7 +132,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       setSheetsSyncResult({
         success: true,
         message: `¡Datos enviados a Google Sheets exitosamente (${entries.length} registros y códigos)!`,
-        url: SPREADSHEET_URL,
+        url: getSpreadsheetUrl(spreadsheetId.trim()),
       });
     } catch (err: any) {
       setSheetsSyncResult({
@@ -370,10 +368,31 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
 
             <p className="text-[11px] text-slate-300 leading-relaxed font-sans">
-              Hoja de destino vinculada: <a href={SPREADSHEET_URL} target="_blank" rel="noreferrer" className="text-emerald-400 underline font-mono inline-flex items-center gap-0.5 font-bold">Abrir Spreadsheet ({DEFAULT_SPREADSHEET_ID.slice(0, 12)}...) <ExternalLink size={10} /></a>. {saStatus.isConfigured ? (
-                <span className="text-emerald-300"> Autenticación configurada vía Service Account <span className="font-mono text-slate-200">{saStatus.clientEmail}</span>.</span>
+              {spreadsheetId ? (
+                <>
+                  Hoja de destino vinculada:{' '}
+                  <a
+                    href={getSpreadsheetUrl(spreadsheetId)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-emerald-400 underline font-mono inline-flex items-center gap-0.5 font-bold"
+                  >
+                    Abrir Spreadsheet ({spreadsheetId.slice(0, 12)}...) <ExternalLink size={10} />
+                  </a>
+                  .{' '}
+                </>
+              ) : null}
+              {saStatus.isConfigured ? (
+                <span className="text-emerald-300">
+                  {' '}
+                  Autenticación configurada vía Service Account{' '}
+                  <span className="font-mono text-slate-200">{saStatus.clientEmail}</span>.
+                </span>
               ) : (
-                <span className="text-slate-400"> Puedes configurar <span className="font-mono text-slate-200">GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON</span> en Ajustes &gt; Secrets para sincronización directa sin ventanas emergentes.</span>
+                <span className="text-slate-400">
+                  {' '}
+                  Puedes configurar <span className="font-mono text-slate-200">GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON</span> en Ajustes &gt; Secrets para sincronización directa sin ventanas emergentes.
+                </span>
               )}
             </p>
 

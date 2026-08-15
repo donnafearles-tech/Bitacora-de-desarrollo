@@ -1,10 +1,15 @@
 import { LogEntry } from '../types';
 
-// Exact Spreadsheet ID and details provided by the user
-export const DEFAULT_SPREADSHEET_ID = '116OlNYVOFJAz3GFNa1yq1TGRQ_qMPo5oiX_RhPQCbDI';
-export const SPREADSHEET_URL = `https://docs.google.com/spreadsheets/d/${DEFAULT_SPREADSHEET_ID}/edit?gid=0#gid=0`;
-export const SERVICE_ACCOUNT_EMAIL = 'bitacora@aplicaciones-de-dessarrollo.iam.gserviceaccount.com';
-export const OWNER_ACCOUNT_EMAIL = 'donna@zavalaperez@gmail.com';
+// Dynamic Spreadsheet URL & Config (configured via GOOGLE_SHEETS_SPREADSHEET_ID or Export Modal)
+export const DEFAULT_SPREADSHEET_ID: string =
+  ((import.meta as any)?.env?.VITE_SPREADSHEET_ID as string) || '';
+
+export const getSpreadsheetUrl = (id?: string) => {
+  const target = id || DEFAULT_SPREADSHEET_ID;
+  return target ? `https://docs.google.com/spreadsheets/d/${target}/edit?gid=0#gid=0` : '';
+};
+
+export const SPREADSHEET_URL = getSpreadsheetUrl(DEFAULT_SPREADSHEET_ID);
 
 declare global {
   interface Window {
