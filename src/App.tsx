@@ -68,9 +68,10 @@ export default function App() {
       const res = await fetch('/api/entries');
       if (!res.ok) throw new Error('Error al cargar bitácora');
       const data = await res.json();
-      setEntries(data);
+      setEntries(Array.isArray(data) ? data : []);
     } catch (err: any) {
       console.error('Error fetching entries:', err);
+      setEntries([]);
     } finally {
       setIsLoading(false);
     }
@@ -82,7 +83,9 @@ export default function App() {
       const res = await fetch('/api/stats');
       if (res.ok) {
         const data = await res.json();
-        setStats(data);
+        if (data && typeof data === 'object' && !data.error) {
+          setStats(data);
+        }
       }
     } catch (err) {
       console.error('Error fetching stats:', err);

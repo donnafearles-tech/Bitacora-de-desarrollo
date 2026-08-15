@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { Storage } from './server/storage';
 import { generateWeeklySummary, solveErrorWithAI, generateSummaryHeadline, generateCompositeCode, getAIConfig } from './server/ai';
@@ -291,6 +292,11 @@ async function startServer() {
     }
   });
 
+  // 404 handler for API routes
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({ error: `Ruta API no encontrada: ${req.method} ${req.path}` });
+  });
+
   // --- VITE / STATIC SERVING ---
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -299,7 +305,14 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    // Resolve dist directory defensively
+    let distPath = path.join(process.cwd(), 'dist');
+    if (!fs.existsSync(path.join(distPath, 'index.html')) && fs.existsSync(path.join(__dirname, 'index.html'))) {
+      distPath = __dirname;
+    } else if (!fs.existsSync(path.join(distPath, 'index.html')) && fs.existsSync(path.join(__dirname, '..', 'dist', 'index.html'))) {
+      distPath = path.join(__dirname, '..', 'dist');
+    }
+
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
