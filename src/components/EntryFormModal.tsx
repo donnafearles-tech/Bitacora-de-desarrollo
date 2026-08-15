@@ -30,6 +30,9 @@ import {
   RotateCcw,
   Timer,
   Plus,
+  Bell,
+  Volume2,
+  Coffee,
 } from 'lucide-react';
 import { LogEntry } from '../types';
 import { MarkdownRenderer } from './MarkdownRenderer';
@@ -64,9 +67,16 @@ export const EntryFormModal: React.FC<EntryFormModalProps> = ({
   const [plan, setPlan] = useState('');
   const [tagInput, setTagInput] = useState('');
   const [tags, setTags] = useState<string[]>([]);
-  const [timeSpentHours, setTimeSpentHours] = useState<number>(4);
+  const [tagDescriptions, setTagDescriptions] = useState<Record<string, string>>({});
+  const [timeSpentHours, setTimeSpentHours] = useState<number>(0);
   const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
-  const [timerSeconds, setTimerSeconds] = useState<number>(4 * 3600);
+  const [timerSeconds, setTimerSeconds] = useState<number>(0); // Total Master Chronometer (seconds)
+  const [pomodoroSeconds, setPomodoroSeconds] = useState<number>(25 * 60); // Current Pomodoro interval countdown (seconds)
+  const [pomodoroDuration, setPomodoroDuration] = useState<number>(25 * 60); // Interval target (e.g. 25m = 1500s)
+  const [pomodoroIntervalCount, setPomodoroIntervalCount] = useState<number>(1); // Current interval number (1, 2, 3...)
+  const [completedPomodoros, setCompletedPomodoros] = useState<number>(0); // Total completed intervals
+  const [pomodoroType, setPomodoroType] = useState<'work' | 'break'>('work');
+  const [pomodoroCompleted, setPomodoroCompleted] = useState<boolean>(false);
   const [mood, setMood] = useState<'flow' | 'productive' | 'blocked' | 'learning' | 'refactor'>('productive');
   const [image, setImage] = useState<string | undefined>(undefined);
   const [activeTab, setActiveTab] = useState<'edit' | 'preview'>('edit');
@@ -80,6 +90,11 @@ export const EntryFormModal: React.FC<EntryFormModalProps> = ({
   // Kimi AI Headline Generation State
   const [isGeneratingHeadline, setIsGeneratingHeadline] = useState(false);
   const [headlineSuccess, setHeadlineSuccess] = useState(false);
+
+  // Kimi AI Atlas.ti Composite Code Generation State
+  const [baseTagForAi, setBaseTagForAi] = useState('Python');
+  const [isGeneratingCode, setIsGeneratingCode] = useState(false);
+  const [codeSuccessMsg, setCodeSuccessMsg] = useState<string | null>(null);
 
   const activitiesTextareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -96,14 +111,15 @@ export const EntryFormModal: React.FC<EntryFormModalProps> = ({
       setSolutions(initialEntry.solutions || '');
       setPlan(initialEntry.plan || '');
       setTags(initialEntry.tags || []);
+      setTagDescriptions(initialEntry.tagDescriptions || {});
       const hrs = initialEntry.timeSpentHours || 4;
       setTimeSpentHours(hrs);
       setTimerSeconds(Math.round(hrs * 3600));
       setIsTimerRunning(false);
       setMood(initialEntry.mood || 'productive');
       setImage(initialEntry.image);
-    } else {
-      // Reset to defaults with local browser date
+    } else if (isOpen) {
+      // Reset to defaults with local browser date & AUTO-START LIVE TIMER
       setDate(getTodayLocalDateString());
       setSummary('');
       setProject(existingProjects[0] || 'General');
@@ -112,9 +128,13 @@ export const EntryFormModal: React.FC<EntryFormModalProps> = ({
       setSolutions('');
       setPlan('');
       setTags(['dev']);
-      setTimeSpentHours(4);
-      setTimerSeconds(4 * 3600);
-      setIsTimerRunning(false);
+      setTagDescriptions({});
+      setTimeSpentHours(0);
+      setTimerSeconds(0);
+      setPomodoroSeconds(25 * 60);
+      setPomodoroDuration(25 * 60);
+      setPomodoroCompleted(false);
+      setIsTimerRunning(true); // Auto-iniciar pomodoro de 25m al abrir nueva entrada
       setMood('productive');
       setImage(undefined);
     }
@@ -124,16 +144,70 @@ export const EntryFormModal: React.FC<EntryFormModalProps> = ({
     setErrorMsg(null);
   }, [initialEntry, isOpen, existingProjects]);
 
-  // Live Timer Interval
+  // Web Audio API notification sound for Pomodoro completion
+  const playNotificationSound = () => {
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const ctx = new AudioContextClass();
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
+
+      const playTone = (freq: number, start: number, duration: number, volume = 0.3) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
+
+        gain.gain.setValueAtTime(0, ctx.currentTime + start);
+        gain.gain.linearRampToValueAtTime(volume, ctx.currentTime + start + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + duration);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(ctx.currentTime + start);
+        osc.stop(ctx.currentTime + start + duration);
+      };
+
+      // Melodic 5-note ascending bell chime: C5 (523Hz) -> E5 (659Hz) -> G5 (784Hz) -> C6 (1046Hz) -> E6 (1318Hz)
+      playTone(523.25, 0, 0.45, 0.28);
+      playTone(659.25, 0.15, 0.45, 0.30);
+      playTone(783.99, 0.30, 0.50, 0.32);
+      playTone(1046.50, 0.48, 0.85, 0.38);
+      playTone(1318.51, 0.68, 1.20, 0.35);
+    } catch (err) {
+      console.warn('No se pudo reproducir audio de notificación:', err);
+    }
+  };
+
+  // Synchronized Dual Timer Interval:
+  // 1. Pomodoro decrements interval countdown (25m) and triggers auto chime sound
+  // 2. Crono simultaneously increments total elapsed session time in seconds
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
     if (isTimerRunning) {
       interval = setInterval(() => {
+        // 1. Accumulate overall master chronometer time continuously
         setTimerSeconds(prev => {
           const next = prev + 1;
           const computedHours = Math.max(0.1, Math.round((next / 3600) * 10) / 10);
           setTimeSpentHours(computedHours);
           return next;
+        });
+
+        // 2. Decrement Pomodoro interval countdown simultaneously
+        setPomodoroSeconds(prev => {
+          if (prev <= 1) {
+            // Interval finished: ring notification sound automatically!
+            playNotificationSound();
+            setPomodoroCompleted(true);
+            setCompletedPomodoros(c => c + 1);
+            return 0;
+          }
+          return prev - 1;
         });
       }, 1000);
     }
@@ -142,24 +216,38 @@ export const EntryFormModal: React.FC<EntryFormModalProps> = ({
     };
   }, [isTimerRunning]);
 
-  const handleSliderChange = (newHours: number) => {
-    setTimeSpentHours(newHours);
-    setTimerSeconds(Math.round(newHours * 3600));
+  const handleStartNextPomodoro = (type: 'work' | 'break' = 'work', minutes = 25) => {
+    const totalSecs = minutes * 60;
+    setPomodoroType(type);
+    setPomodoroDuration(totalSecs);
+    setPomodoroSeconds(totalSecs);
+    setPomodoroCompleted(false);
+    if (type === 'work') {
+      setPomodoroIntervalCount(c => c + 1);
+    }
+    setIsTimerRunning(true);
   };
 
-  const handleAddTimerSeconds = (additionalSecs: number) => {
-    setTimerSeconds(prev => {
-      const next = Math.max(0, prev + additionalSecs);
-      const computedHours = Math.max(0.1, Math.round((next / 3600) * 10) / 10);
-      setTimeSpentHours(computedHours);
-      return next;
-    });
+  const handleResetPomodoroInterval = () => {
+    setPomodoroCompleted(false);
+    setPomodoroSeconds(pomodoroDuration);
   };
 
-  const handleResetTimer = () => {
+  const handleResetAllTimers = () => {
     setIsTimerRunning(false);
+    setPomodoroCompleted(false);
+    setPomodoroSeconds(25 * 60);
+    setPomodoroDuration(25 * 60);
+    setPomodoroIntervalCount(1);
+    setPomodoroType('work');
     setTimerSeconds(0);
-    setTimeSpentHours(0.5);
+    setTimeSpentHours(0);
+  };
+
+  const formatPomodoroDisplay = (totalSecs: number) => {
+    const mins = Math.floor(totalSecs / 60);
+    const secs = totalSecs % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
   const formatTimerDisplay = (totalSecs: number) => {
@@ -197,6 +285,11 @@ export const EntryFormModal: React.FC<EntryFormModalProps> = ({
 
   const handleRemoveTag = (tagToRemove: string) => {
     setTags(tags.filter(t => t !== tagToRemove));
+    setTagDescriptions(prev => {
+      const next = { ...prev };
+      delete next[tagToRemove];
+      return next;
+    });
   };
 
   const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -296,6 +389,62 @@ export const EntryFormModal: React.FC<EntryFormModalProps> = ({
     }
   };
 
+  // AI Generate Composite Code for Atlas.ti (e.g. "Python: correccion_bucles")
+  const handleGenerateCompositeCode = async () => {
+    const rawContent = [activities, obstacles, solutions, summary].filter(Boolean).join('\n\n').trim();
+    if (!rawContent || rawContent.length < 5) {
+      setErrorMsg('Escribe primero el contenido de tu entrada (actividades, obstáculos o código) para que la IA deduzca la palabra clave.');
+      return;
+    }
+
+    const currentBase = baseTagForAi.trim();
+    if (!currentBase) {
+      setErrorMsg('Selecciona o escribe una etiqueta base (ej: Python, React, Bug).');
+      return;
+    }
+
+    try {
+      setIsGeneratingCode(true);
+      setErrorMsg(null);
+      setCodeSuccessMsg(null);
+
+      const res = await fetch('/api/ai/generate-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          baseTag: currentBase,
+          content: rawContent,
+          project: project || 'General',
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'No se pudo generar el código compuesto.');
+      }
+
+      const data = await res.json();
+      if (data.compositeCode) {
+        const codeToAdd = data.compositeCode.trim();
+        if (!tags.includes(codeToAdd)) {
+          setTags(prev => [...prev, codeToAdd]);
+        }
+        if (data.description) {
+          setTagDescriptions(prev => ({
+            ...prev,
+            [codeToAdd]: data.description.trim(),
+          }));
+        }
+        setCodeSuccessMsg(`Código generado: "${codeToAdd}"`);
+        setTimeout(() => setCodeSuccessMsg(null), 4000);
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error al generar el código compuesto con IA.');
+    } finally {
+      setIsGeneratingCode(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!date) {
@@ -321,6 +470,7 @@ export const EntryFormModal: React.FC<EntryFormModalProps> = ({
         solutions,
         plan,
         tags,
+        tagDescriptions,
         timeSpentHours: Number(timeSpentHours) || 1,
         mood,
         image,
@@ -416,121 +566,233 @@ export const EntryFormModal: React.FC<EntryFormModalProps> = ({
               </datalist>
             </div>
 
-            <div className="bg-[#0b0f19] border border-[#1e293b] rounded-lg p-2.5 space-y-2">
+            <div className="bg-[#0b0f19] border border-[#1e293b] rounded-lg p-2 space-y-2 text-[8.5px]">
+              {/* Header: Sincronización & Badges */}
               <div className="flex items-center justify-between gap-1 flex-wrap">
-                <label className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                  <Timer size={12} className={isTimerRunning ? 'text-emerald-400 animate-spin' : 'text-blue-400'} />
-                  <span>TIME_SPENT:</span>
-                  <span className="text-blue-400 font-bold">{timeSpentHours}h</span>
-                </label>
-
-                {/* Live Digital Clock Badge */}
                 <div className="flex items-center gap-1">
-                  {isTimerRunning && (
-                    <span className="flex h-2 w-2 relative">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  <div className="flex items-center gap-1 bg-rose-950/70 text-rose-300 border border-rose-800/60 px-1.5 py-0.5 rounded text-[8.5px] font-mono font-bold">
+                    <span>🍅 POMODORO 25M</span>
+                  </div>
+                  <span className="text-slate-600 font-mono text-[8.5px]">⇄</span>
+                  <div className="flex items-center gap-1 bg-blue-950/70 text-blue-300 border border-blue-800/60 px-1.5 py-0.5 rounded text-[8.5px] font-mono font-bold">
+                    <span>⏱️ CRONO TOTAL</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1 text-[8.5px] font-mono">
+                  <span className="bg-[#111827] text-slate-300 border border-[#1e293b] px-1.5 py-0.5 rounded">
+                    INT: <strong className="text-amber-400">#{pomodoroIntervalCount}</strong>
+                  </span>
+                  {completedPomodoros > 0 && (
+                    <span className="bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 px-1.5 py-0.5 rounded font-bold">
+                      ✓ {completedPomodoros} {completedPomodoros === 1 ? 'completado' : 'completados'}
                     </span>
                   )}
-                  <span
-                    className={`font-mono text-[11px] font-bold px-1.5 py-0.5 rounded border transition ${
-                      isTimerRunning
-                        ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600 shadow-[0_0_8px_rgba(16,185,129,0.3)]'
-                        : 'bg-slate-900 text-cyan-300 border-slate-700'
-                    }`}
-                    title="Tiempo acumulado (HH:MM:SS)"
-                  >
-                    {formatTimerDisplay(timerSeconds)}
+                  <span className="text-blue-400 font-bold bg-blue-950/80 px-1.5 py-0.5 rounded border border-blue-800/60">
+                    TOTAL: {timeSpentHours}h
                   </span>
                 </div>
               </div>
 
-              {/* Live Timer Controls (Play/Pause, Quick Adds, Reset) */}
-              <div className="flex items-center justify-between gap-1.5">
+              {/* Dual Synchronized Clocks (Side by Side) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                {/* 1. Pomodoro 25m Interval Box */}
+                <div className="bg-[#111827]/90 rounded-lg p-2 border border-rose-950/60 space-y-1 relative overflow-hidden">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[8px] font-mono uppercase tracking-wider text-rose-400 font-bold flex items-center gap-1">
+                      {isTimerRunning ? (
+                        <span className="flex h-1.5 w-1.5 relative">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-rose-500"></span>
+                        </span>
+                      ) : (
+                        <Timer size={10} className="text-rose-400" />
+                      )}
+                      <span>{pomodoroType === 'work' ? `INTERVALO #${pomodoroIntervalCount} (25M)` : 'DESCANSO (5M)'}</span>
+                    </span>
+                    <span className="text-[8px] font-mono text-slate-500">
+                      {Math.round(pomodoroDuration / 60)}m meta
+                    </span>
+                  </div>
+
+                  <div className="flex items-baseline justify-between">
+                    <div
+                      className={`font-mono text-[17px] font-bold tracking-wider ${
+                        pomodoroCompleted
+                          ? 'text-emerald-400 animate-pulse'
+                          : isTimerRunning
+                          ? 'text-rose-300 drop-shadow-[0_0_8px_rgba(244,63,94,0.4)]'
+                          : 'text-slate-300'
+                      }`}
+                    >
+                      {formatPomodoroDisplay(pomodoroSeconds)}
+                    </div>
+                    <span className="text-[8px] font-mono text-slate-400">
+                      {Math.min(100, Math.round(((pomodoroDuration - pomodoroSeconds) / pomodoroDuration) * 100))}%
+                    </span>
+                  </div>
+
+                  {/* Pomodoro Progress Bar */}
+                  <div className="h-1.5 w-full bg-slate-900 rounded-full overflow-hidden border border-[#1e293b]">
+                    <div
+                      className={`h-full transition-all duration-300 rounded-full ${
+                        pomodoroCompleted
+                          ? 'bg-emerald-500'
+                          : isTimerRunning
+                          ? 'bg-gradient-to-r from-rose-600 via-orange-500 to-amber-400'
+                          : 'bg-rose-800'
+                      }`}
+                      style={{
+                        width: `${Math.min(100, Math.max(2, ((pomodoroDuration - pomodoroSeconds) / pomodoroDuration) * 100))}%`,
+                      }}
+                    ></div>
+                  </div>
+                </div>
+
+                {/* 2. Total Master Chrono Box */}
+                <div className="bg-[#111827]/90 rounded-lg p-2 border border-blue-950/60 space-y-1 relative overflow-hidden">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[8px] font-mono uppercase tracking-wider text-blue-400 font-bold flex items-center gap-1">
+                      {isTimerRunning ? (
+                        <span className="flex h-1.5 w-1.5 relative">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500"></span>
+                        </span>
+                      ) : (
+                        <Timer size={10} className="text-blue-400" />
+                      )}
+                      <span>CRONO TOTAL (SESIÓN)</span>
+                    </span>
+                    <span className="text-[8px] font-mono text-emerald-400 font-bold">
+                      {timeSpentHours}h REGISTRADAS
+                    </span>
+                  </div>
+
+                  <div className="flex items-baseline justify-between">
+                    <div
+                      className={`font-mono text-[17px] font-bold tracking-wider ${
+                        isTimerRunning
+                          ? 'text-cyan-300 drop-shadow-[0_0_8px_rgba(6,182,212,0.4)]'
+                          : 'text-slate-300'
+                      }`}
+                    >
+                      {formatTimerDisplay(timerSeconds)}
+                    </div>
+                    <span className="text-[8px] font-mono text-slate-500">
+                      acumulado continuo
+                    </span>
+                  </div>
+
+                  {/* Chrono Progress Bar (based on 8h work day) */}
+                  <div className="h-1.5 w-full bg-slate-900 rounded-full overflow-hidden border border-[#1e293b]">
+                    <div
+                      className={`h-full transition-all duration-300 rounded-full ${
+                        isTimerRunning
+                          ? 'bg-gradient-to-r from-blue-500 via-cyan-400 to-emerald-400'
+                          : 'bg-blue-800'
+                      }`}
+                      style={{
+                        width: `${Math.min(100, Math.max(2, (timerSeconds / (8 * 3600)) * 100))}%`,
+                      }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Pomodoro Completed Alert & Audio Notification */}
+              {pomodoroCompleted && (
+                <div className="flex items-center justify-between gap-1.5 p-1.5 rounded-lg bg-gradient-to-r from-emerald-950 via-teal-950 to-slate-950 border border-emerald-500/80 text-emerald-300 text-[8.5px] font-mono animate-bounce shadow-lg">
+                  <div className="flex items-center gap-1.5">
+                    <Bell size={12} className="text-emerald-400 animate-spin" />
+                    <div>
+                      <div className="font-bold">¡INTERVALO #{pomodoroIntervalCount} (25M) COMPLETADO!</div>
+                      <div className="text-[7.5px] text-slate-400">Sonido de campana emitido automáticamente. El crono total sigue activo.</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleStartNextPomodoro('work', 25)}
+                      className="px-1.5 py-0.5 rounded bg-rose-700 hover:bg-rose-600 text-white text-[8px] font-mono font-bold cursor-pointer transition shadow"
+                    >
+                      🍅 SIG. 25M (#{pomodoroIntervalCount + 1})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleStartNextPomodoro('break', 5)}
+                      className="px-1.5 py-0.5 rounded bg-emerald-800 hover:bg-emerald-700 text-white text-[8px] font-mono font-bold cursor-pointer transition shadow"
+                    >
+                      ☕ DESCANSO 5M
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Unified Controls Toolbar */}
+              <div className="flex items-center justify-between gap-1 flex-wrap pt-0.5">
+                {/* Play/Pause both synchronized timers */}
                 <button
                   type="button"
                   onClick={() => setIsTimerRunning(!isTimerRunning)}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded text-[10px] font-mono font-bold transition cursor-pointer ${
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded text-[9px] font-mono font-bold transition cursor-pointer ${
                     isTimerRunning
                       ? 'bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-600 shadow-[0_0_8px_rgba(245,158,11,0.3)]'
                       : 'bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-600 shadow-[0_0_8px_rgba(16,185,129,0.3)]'
                   }`}
-                  title={isTimerRunning ? 'Pausar conteo en vivo' : 'Iniciar cronómetro en vivo'}
+                  title={isTimerRunning ? 'Pausar ambos contadores' : 'Reanudar ambos contadores sincronizados'}
                 >
-                  {isTimerRunning ? <Pause size={11} /> : <Play size={11} />}
-                  <span>{isTimerRunning ? 'PAUSAR' : 'INICIAR_CRONO'}</span>
+                  {isTimerRunning ? <Pause size={10} /> : <Play size={10} />}
+                  <span>{isTimerRunning ? 'PAUSAR_AMBOS' : 'INICIAR_AMBOS'}</span>
                 </button>
 
-                <div className="flex items-center gap-1">
+                {/* Interval and Sound Fast Actions */}
+                <div className="flex items-center gap-1 flex-wrap">
                   <button
                     type="button"
-                    onClick={() => handleAddTimerSeconds(15 * 60)}
-                    className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-[#111827] hover:bg-[#1e293b] text-slate-300 hover:text-white border border-[#1e293b] transition cursor-pointer"
-                    title="Agregar 15 minutos"
+                    onClick={() => handleStartNextPomodoro('work', 25)}
+                    className="px-1.5 py-0.5 rounded text-[8.5px] font-mono bg-rose-950/50 hover:bg-rose-900/80 text-rose-300 hover:text-white border border-rose-800/60 transition cursor-pointer"
+                    title="Comenzar nuevo intervalo de 25 minutos"
                   >
-                    +15m
+                    🍅 +25m Focus
                   </button>
+
                   <button
                     type="button"
-                    onClick={() => handleAddTimerSeconds(30 * 60)}
-                    className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-[#111827] hover:bg-[#1e293b] text-slate-300 hover:text-white border border-[#1e293b] transition cursor-pointer"
-                    title="Agregar 30 minutos"
+                    onClick={() => handleStartNextPomodoro('break', 5)}
+                    className="px-1.5 py-0.5 rounded text-[8.5px] font-mono bg-[#111827] hover:bg-[#1e293b] text-slate-300 hover:text-white border border-[#1e293b] transition cursor-pointer"
+                    title="Iniciar descanso de 5 minutos"
                   >
-                    +30m
+                    ☕ +5m Break
                   </button>
+
                   <button
                     type="button"
-                    onClick={() => handleAddTimerSeconds(60 * 60)}
-                    className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-[#111827] hover:bg-[#1e293b] text-slate-300 hover:text-white border border-[#1e293b] transition cursor-pointer"
-                    title="Agregar 1 hora"
+                    onClick={playNotificationSound}
+                    className="px-1.5 py-0.5 rounded bg-[#1f293d] hover:bg-[#283548] text-slate-300 hover:text-amber-300 border border-[#334155] text-[8.5px] font-mono flex items-center gap-1 transition cursor-pointer"
+                    title="Probar campana melódica de notificación"
                   >
-                    +1h
+                    <Bell size={9} className="text-amber-400" />
+                    <span>CAMPANA</span>
                   </button>
+
                   <button
                     type="button"
-                    onClick={handleResetTimer}
+                    onClick={handleResetPomodoroInterval}
+                    className="px-1.5 py-0.5 rounded text-[8.5px] font-mono bg-[#111827] hover:bg-[#1e293b] text-slate-400 hover:text-amber-300 border border-[#1e293b] transition cursor-pointer"
+                    title="Reiniciar sólo el intervalo de 25m (conserva el crono total)"
+                  >
+                    ↺ Int.
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleResetAllTimers}
                     className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-[#111827] border border-transparent hover:border-[#1e293b] transition cursor-pointer"
-                    title="Reiniciar cronómetro"
+                    title="Reiniciar todo a 0 (Intervalo y Crono total)"
                   >
-                    <RotateCcw size={11} />
+                    <RotateCcw size={10} />
                   </button>
                 </div>
-              </div>
-
-              {/* Dynamic Real-Time Progress Bar (based on standard 8h day) */}
-              <div className="space-y-1">
-                <div className="flex items-center justify-between text-[9px] font-mono text-slate-500">
-                  <span>PROGRESO_JORNADA</span>
-                  <span className={isTimerRunning ? 'text-emerald-400 font-bold' : 'text-slate-400'}>
-                    {Math.min(100, Math.round((timerSeconds / (8 * 3600)) * 100))}% (8h meta)
-                  </span>
-                </div>
-                <div className="h-2 w-full bg-[#111827] rounded-full overflow-hidden border border-[#1e293b] relative">
-                  <div
-                    className={`h-full transition-all duration-300 rounded-full ${
-                      isTimerRunning
-                        ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]'
-                        : 'bg-gradient-to-r from-blue-600 to-indigo-500'
-                    }`}
-                    style={{ width: `${Math.min(100, Math.max(2, (timerSeconds / (8 * 3600)) * 100))}%` }}
-                  ></div>
-                </div>
-              </div>
-
-              {/* Range slider for manual adjustment */}
-              <div className="flex items-center gap-2 pt-0.5">
-                <input
-                  type="range"
-                  min="0.5"
-                  max="14"
-                  step="0.5"
-                  value={timeSpentHours}
-                  onChange={e => handleSliderChange(parseFloat(e.target.value))}
-                  className="flex-1 accent-blue-500 cursor-pointer"
-                />
-                <span className="text-[10px] font-mono text-slate-400 min-w-[32px] text-right">
-                  {timeSpentHours}h
-                </span>
               </div>
             </div>
           </div>
@@ -539,7 +801,7 @@ export const EntryFormModal: React.FC<EntryFormModalProps> = ({
           <div>
             <div className="flex items-center justify-between mb-1.5 gap-2 flex-wrap">
               <label className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400">
-                📌 SUMMARY_HEADLINE // ENCABEZADO
+                📌 SUMMARY_HEADLINE // SUMARIO CONDENSADO
               </label>
 
               {/* AI Auto-generate button */}
@@ -554,22 +816,22 @@ export const EntryFormModal: React.FC<EntryFormModalProps> = ({
                     ? 'bg-blue-950 text-blue-300 border border-blue-800 animate-pulse cursor-wait'
                     : 'bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 hover:text-blue-300 border border-blue-500/50 hover:border-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.25)] active:scale-95'
                 }`}
-                title="Kimi K3 analiza el texto y código Markdown de las actividades para formular un encabezado técnico conciso"
+                title="Kimi K3 sintetiza un titular técnico conciso de alta densidad informativa (no copia párrafos)"
               >
                 {isGeneratingHeadline ? (
                   <>
                     <RefreshCw size={11} className="animate-spin text-blue-400" />
-                    <span>SINTETIZANDO_CON_KIMI_K3...</span>
+                    <span>SINTETIZANDO_SUMARIO_CONDENSADO...</span>
                   </>
                 ) : headlineSuccess ? (
                   <>
                     <Check size={11} className="text-emerald-400" />
-                    <span>TITULAR_GENERADO_✓</span>
+                    <span>SUMARIO_GENERADO_✓</span>
                   </>
                 ) : (
                   <>
                     <Sparkles size={11} className="text-blue-400" />
-                    <span>⚡ GENERAR_ENCABEZADO_CON_KIMI</span>
+                    <span>⚡ CONDENSAR_SUMARIO_CON_KIMI</span>
                   </>
                 )}
               </button>
@@ -579,7 +841,7 @@ export const EntryFormModal: React.FC<EntryFormModalProps> = ({
                 type="text"
                 value={summary}
                 onChange={e => setSummary(e.target.value)}
-                placeholder="Ej: Optimización de consultas SQL y refactor de autenticación OAuth"
+                placeholder="Ej: Implementación de rotación de tokens JWT y control de expiración de sesiones"
                 required
                 className="w-full bg-[#111827] border border-[#1e293b] focus:border-blue-500 rounded px-3 py-2 text-xs text-white font-medium focus:outline-none placeholder-slate-500"
               />
@@ -827,11 +1089,11 @@ export const EntryFormModal: React.FC<EntryFormModalProps> = ({
             />
           </div>
 
-          {/* Row 7: Enhanced Tags with Dropdown Selector & Smart Related Tags */}
-          <div className="space-y-2">
+          {/* Row 7: Enhanced Tags & Atlas.ti Composite Codes */}
+          <div className="space-y-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <label className="block text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400">
-                🏷️ SYSTEM_TAGS [ENTER O COMA]
+                🏷️ SYSTEM_TAGS & ATLAS.TI CODES
               </label>
 
               {/* Toggle Dropdown Explorer & Quick Native Dropdown */}
@@ -840,7 +1102,10 @@ export const EntryFormModal: React.FC<EntryFormModalProps> = ({
                 <select
                   value=""
                   onChange={e => {
-                    if (e.target.value) handleAddTag(e.target.value);
+                    if (e.target.value) {
+                      handleAddTag(e.target.value);
+                      setBaseTagForAi(e.target.value);
+                    }
                   }}
                   className="bg-[#111827] border border-[#1e293b] text-blue-300 text-[10px] font-mono rounded px-2 py-1 focus:outline-none cursor-pointer"
                   title="Lista desplegable de tags más frecuentes y relacionados"
@@ -878,31 +1143,111 @@ export const EntryFormModal: React.FC<EntryFormModalProps> = ({
                 </button>
               </div>
             </div>
+
+            {/* AI Composite Code Generation for Atlas.ti */}
+            <div className="p-2.5 bg-[#070913] border border-purple-900/50 rounded-lg space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-[10px] font-mono text-purple-300 font-bold uppercase">
+                  <Sparkles size={12} className="text-purple-400" />
+                  <span>CÓDIGO_COMPUESTO_IA (ATLAS.TI // FORMATO: EtiquetaBase: palabra_clave)</span>
+                </div>
+                {codeSuccessMsg && (
+                  <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-700/60 animate-pulse">
+                    ✓ {codeSuccessMsg}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1.5 bg-[#111827] border border-purple-800/40 rounded px-2 py-1">
+                  <span className="text-[10px] font-mono text-slate-400">BASE:</span>
+                  <select
+                    value={baseTagForAi}
+                    onChange={e => setBaseTagForAi(e.target.value)}
+                    className="bg-transparent text-purple-200 text-xs font-mono font-bold focus:outline-none cursor-pointer"
+                  >
+                    {['Python', 'React', 'TypeScript', 'Node.js', 'Bug', 'SQL', 'FastAPI', 'Docker', 'DevOps', 'Performance', 'Auth', 'Refactor', 'Testing', 'Architecture', 'CSS', 'Git', 'API'].map(opt => (
+                      <option key={opt} value={opt} className="bg-[#0a0c14] text-white">
+                        {opt}
+                      </option>
+                    ))}
+                    {tags.filter(t => !t.includes(':')).map(t => (
+                      <option key={t} value={t} className="bg-[#0a0c14] text-white">
+                        {t} (Actual)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleGenerateCompositeCode}
+                  disabled={isGeneratingCode}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-mono font-bold transition-all cursor-pointer ${
+                    isGeneratingCode
+                      ? 'bg-purple-950 text-purple-300 border border-purple-800 animate-pulse cursor-wait'
+                      : 'bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 hover:text-white border border-purple-500/60 shadow-[0_0_10px_rgba(168,85,247,0.3)] active:scale-95'
+                  }`}
+                  title="La IA analiza las actividades y deduce un código temático (ej: Python: correccion_bucles)"
+                >
+                  {isGeneratingCode ? (
+                    <>
+                      <RefreshCw size={12} className="animate-spin text-purple-300" />
+                      <span>DEDUCIENDO_CÓDIGO...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Wand2 size={12} className="text-purple-300" />
+                      <span>⚡ GENERAR CÓDIGO COMPUESTO CON IA</span>
+                    </>
+                  )}
+                </button>
+
+                <span className="text-[9px] font-mono text-slate-500 hidden xl:inline">
+                  Ej: "{baseTagForAi}: deduccion_automatica"
+                </span>
+              </div>
+            </div>
             
             {/* Tag Pills & Input Box */}
             <div className="flex flex-wrap items-center gap-1.5 p-2 bg-[#111827] border border-[#1e293b] rounded min-h-[38px]">
-              {tags.map(t => (
-                <span
-                  key={t}
-                  className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#05060a] text-blue-300 border border-blue-500/40 text-[10px] font-mono"
-                >
-                  #{t}
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveTag(t)}
-                    className="text-slate-400 hover:text-rose-400 cursor-pointer"
+              {tags.map(t => {
+                const isComposite = t.includes(':');
+                return (
+                  <span
+                    key={t}
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono transition ${
+                      isComposite
+                        ? 'bg-gradient-to-r from-purple-950 to-blue-950 text-purple-200 border border-purple-500/70 shadow-[0_0_8px_rgba(168,85,247,0.25)] font-bold'
+                        : 'bg-[#05060a] text-blue-300 border border-blue-500/40'
+                    }`}
+                    title={
+                      tagDescriptions[t]
+                        ? `${t} — ${tagDescriptions[t]}`
+                        : isComposite
+                        ? 'Código compuesto para análisis en Atlas.ti'
+                        : 'Tag del sistema'
+                    }
                   >
-                    ×
-                  </button>
-                </span>
-              ))}
+                    {isComposite ? '🏷️ ' : '#'}
+                    {t}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveTag(t)}
+                      className="text-slate-400 hover:text-rose-400 cursor-pointer ml-0.5"
+                    >
+                      ×
+                    </button>
+                  </span>
+                );
+              })}
               <input
                 type="text"
                 value={tagInput}
                 onChange={e => setTagInput(e.target.value)}
                 onKeyDown={handleTagKeyDown}
                 onBlur={() => tagInput && handleAddTag(tagInput)}
-                placeholder={tags.length === 0 ? 'Escribe o selecciona abajo: python, fastapi, docker...' : ''}
+                placeholder={tags.length === 0 ? 'Escribe o selecciona abajo: Python: correccion_bucles, react, docker...' : ''}
                 className="flex-1 bg-transparent border-none text-xs text-slate-100 focus:outline-none min-w-[140px] font-mono"
               />
             </div>

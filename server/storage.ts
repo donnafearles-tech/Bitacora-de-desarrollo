@@ -1,12 +1,13 @@
 import fs from 'fs';
 import path from 'path';
 import { LogEntry, ProductivityStats } from '../src/types';
-import { getSupabase, rowToEntry, entryToRow } from './supabase';
+import { getSupabase, rowToEntry, entryToRow, POSSIBLE_TABLE_NAMES } from './supabase';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'bitacora_db.json');
 
 let inMemoryEntries: LogEntry[] = [];
+let activeTableName = 'devlog_entries';
 
 // Initialize local fallback storage file
 function initStorage() {
@@ -18,19 +19,12 @@ function initStorage() {
       const data = fs.readFileSync(DB_FILE, 'utf-8');
       try {
         const parsed = JSON.parse(data);
-        if (Array.isArray(parsed)) {
+        if (Array.isArray(parsed) && parsed.length > 0) {
           inMemoryEntries = parsed;
-        } else {
-          inMemoryEntries = [];
-          saveStorage();
         }
       } catch (e) {
-        inMemoryEntries = [];
-        saveStorage();
+        // preserve
       }
-    } else {
-      inMemoryEntries = [];
-      saveStorage();
     }
   } catch (err) {
     console.error('Error initializing storage file:', err);
@@ -42,7 +36,10 @@ function saveStorage() {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
-    fs.writeFileSync(DB_FILE, JSON.stringify(inMemoryEntries, null, 2), 'utf-8');
+    // Only save if we actually have entries or if file doesn't exist
+    if (inMemoryEntries.length > 0 || !fs.existsSync(DB_FILE)) {
+      fs.writeFileSync(DB_FILE, JSON.stringify(inMemoryEntries, null, 2), 'utf-8');
+    }
   } catch (err) {
     console.error('Error saving storage file:', err);
   }
@@ -62,49 +59,58 @@ export const Storage = {
     const supabase = getSupabase();
 
     if (supabase) {
-      try {
-        let query = supabase.from('devlog_entries').select('*').order('date', { ascending: false });
+      // Try activeTableName first, then try possible alternatives if table not found
+      const tablesToTry = [activeTableName, ...POSSIBLE_TABLE_NAMES.filter(t => t !== activeTableName)];
 
-        if (filter?.project) {
-          query = query.eq('project', filter.project);
-        }
-        if (filter?.startDate) {
-          query = query.gte('date', filter.startDate);
-        }
-        if (filter?.endDate) {
-          query = query.lte('date', filter.endDate);
-        }
+      for (const tableName of tablesToTry) {
+        try {
+          let query = supabase
+            .from(tableName)
+            .select('*')
+            .order('date', { ascending: false });
 
-        const { data, error } = await query;
-        if (!error && Array.isArray(data)) {
-          const supabaseEntries = data.map(rowToEntry);
-          // Also update local cache for offline backup
-          inMemoryEntries = supabaseEntries;
-          saveStorage();
-
-          let filtered = supabaseEntries;
-          if (filter?.q) {
-            const qLower = filter.q.toLowerCase().trim();
-            filtered = filtered.filter(e =>
-              e.summary.toLowerCase().includes(qLower) ||
-              e.activities.toLowerCase().includes(qLower) ||
-              (e.obstacles && e.obstacles.toLowerCase().includes(qLower)) ||
-              (e.solutions && e.solutions.toLowerCase().includes(qLower)) ||
-              (e.plan && e.plan.toLowerCase().includes(qLower)) ||
-              (e.project && e.project.toLowerCase().includes(qLower)) ||
-              e.tags.some(t => t.toLowerCase().includes(qLower))
-            );
+          if (filter?.project) {
+            query = query.eq('project', filter.project);
           }
-          if (filter?.tag) {
-            const tagLower = filter.tag.toLowerCase().trim();
-            filtered = filtered.filter(e => e.tags.some(t => t.toLowerCase() === tagLower));
+          if (filter?.startDate) {
+            query = query.gte('date', filter.startDate);
           }
-          return filtered;
-        } else if (error) {
-          console.warn('Supabase query warning (falling back to local storage):', error.message);
+          if (filter?.endDate) {
+            query = query.lte('date', filter.endDate);
+          }
+
+          const { data, error } = await query;
+          if (!error && Array.isArray(data)) {
+            activeTableName = tableName;
+            const supabaseEntries = data.map(rowToEntry);
+
+            if (supabaseEntries.length > 0) {
+              inMemoryEntries = supabaseEntries;
+              saveStorage();
+            }
+
+            let filtered = supabaseEntries.length > 0 ? supabaseEntries : inMemoryEntries;
+            if (filter?.q) {
+              const qLower = filter.q.toLowerCase().trim();
+              filtered = filtered.filter(e =>
+                e.summary.toLowerCase().includes(qLower) ||
+                e.activities.toLowerCase().includes(qLower) ||
+                (e.obstacles && e.obstacles.toLowerCase().includes(qLower)) ||
+                (e.solutions && e.solutions.toLowerCase().includes(qLower)) ||
+                (e.plan && e.plan.toLowerCase().includes(qLower)) ||
+                (e.project && e.project.toLowerCase().includes(qLower)) ||
+                e.tags.some(t => t.toLowerCase().includes(qLower))
+              );
+            }
+            if (filter?.tag) {
+              const tagLower = filter.tag.toLowerCase().trim();
+              filtered = filtered.filter(e => e.tags.some(t => t.toLowerCase() === tagLower));
+            }
+            return filtered;
+          }
+        } catch (err) {
+          console.warn(`Supabase query on table '${tableName}' failed:`, err);
         }
-      } catch (err) {
-        console.warn('Supabase fetch error, using local fallback:', err);
       }
     }
 
@@ -144,8 +150,12 @@ export const Storage = {
       result = result.filter(e => e.date <= filter.endDate!);
     }
 
-    // Sort by date DESC
-    return result.sort((a, b) => b.date.localeCompare(a.date));
+    // Sort by date DESC and created_at DESC
+    return result.sort((a, b) => {
+      const dateDiff = b.date.localeCompare(a.date);
+      if (dateDiff !== 0) return dateDiff;
+      return (b.created_at || '').localeCompare(a.created_at || '');
+    });
   },
 
   async getByDateAsync(date: string): Promise<LogEntry | undefined> {
@@ -207,7 +217,7 @@ export const Storage = {
         const row = entryToRow(localEntry);
         const { error } = await supabase
           .from('devlog_entries')
-          .upsert(row, { onConflict: 'date' });
+          .upsert(row, { onConflict: 'id' });
 
         if (error) {
           console.warn('Supabase upsert warning:', error.message);
@@ -221,9 +231,10 @@ export const Storage = {
   },
 
   upsert(entryData: Partial<LogEntry> & { date: string; summary: string }): LogEntry {
-    const existingIndex = inMemoryEntries.findIndex(
-      e => (entryData.id && e.id === entryData.id) || e.date === entryData.date
-    );
+    // Look up ONLY by unique ID when editing
+    const existingIndex = entryData.id
+      ? inMemoryEntries.findIndex(e => e.id === entryData.id)
+      : -1;
 
     const now = new Date().toISOString();
 
@@ -242,7 +253,7 @@ export const Storage = {
       return updated;
     } else {
       const newEntry: LogEntry = {
-        id: entryData.id || `entry-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        id: entryData.id || `entry-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
         date: entryData.date,
         summary: entryData.summary,
         project: entryData.project || 'General',
@@ -274,7 +285,7 @@ export const Storage = {
         await supabase
           .from('devlog_entries')
           .delete()
-          .or(`id.eq.${idOrDate},date.eq.${idOrDate}`);
+          .eq('id', idOrDate);
       } catch (err) {
         console.warn('Supabase delete error:', err);
       }
@@ -285,7 +296,7 @@ export const Storage = {
 
   delete(idOrDate: string): boolean {
     const prevLen = inMemoryEntries.length;
-    inMemoryEntries = inMemoryEntries.filter(e => e.id !== idOrDate && e.date !== idOrDate);
+    inMemoryEntries = inMemoryEntries.filter(e => e.id !== idOrDate);
     if (inMemoryEntries.length !== prevLen) {
       saveStorage();
       return true;

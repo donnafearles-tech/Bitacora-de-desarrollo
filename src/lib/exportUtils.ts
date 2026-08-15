@@ -179,3 +179,121 @@ export function exportToPdf(entries: LogEntry[], filename = 'devlog_informe.pdf'
 
   doc.save(filename);
 }
+
+// -------------------------------------------------------------
+// ATLAS.TI CODEBOOK EXPORT (STRICT 2-COLUMN CSV FORMAT: Code;Comment)
+// -------------------------------------------------------------
+export function exportCodebookForAtlasTi(
+  entries: LogEntry[],
+  filename = 'atlas_ti_codebook.csv'
+) {
+  interface TagMeta {
+    name: string;
+    ocurrencias: number;
+    proyectos: Set<string>;
+    descriptions: Set<string>;
+  }
+
+  // 1. Extraer todas las etiquetas únicas y calcular métricas consolidadas
+  const uniqueTagsMap = new Map<string, TagMeta>();
+
+  entries.forEach(entry => {
+    const proyecto = entry.project && entry.project.trim().length > 0 ? entry.project.trim() : 'General';
+    if (Array.isArray(entry.tags)) {
+      entry.tags.forEach(tag => {
+        if (!tag || typeof tag !== 'string') return;
+        const cleanTag = tag.trim();
+        if (cleanTag.length === 0) return;
+
+        const normalizedKey = cleanTag.toLowerCase();
+        const desc =
+          entry.tagDescriptions?.[cleanTag] ||
+          entry.tagDescriptions?.[tag] ||
+          '';
+
+        if (!uniqueTagsMap.has(normalizedKey)) {
+          uniqueTagsMap.set(normalizedKey, {
+            name: cleanTag,
+            ocurrencias: 1,
+            proyectos: new Set([proyecto]),
+            descriptions: new Set(desc ? [desc.trim()] : []),
+          });
+        } else {
+          const item = uniqueTagsMap.get(normalizedKey)!;
+          item.ocurrencias += 1;
+          item.proyectos.add(proyecto);
+          if (desc && desc.trim()) {
+            item.descriptions.add(desc.trim());
+          }
+        }
+      });
+    }
+  });
+
+  // 2. Ordenar las etiquetas alfabéticamente
+  const uniqueTags = Array.from(uniqueTagsMap.values())
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+
+  // Función de escape estricta para CSV con delimitador punto y coma (;)
+  const cleanField = (text: string | null | undefined): string => {
+    if (text === null || text === undefined) return '';
+    // Reemplazar saltos de línea para mantener 1 fila exacta por tag
+    const str = String(text).trim().replace(/[\r\n]+/g, ' ');
+    if (str.includes(';') || str.includes('"')) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
+  // 3. Encabezado estricto: EXACTAMENTE dos columnas
+  const csvLines: string[] = ['Code;Comment'];
+
+  // 4. Generar cada fila: EXACTAMENTE dos valores separados por punto y coma (;)
+  uniqueTags.forEach(tag => {
+    const isComposite = tag.name.includes(':');
+    const proyectosStr = Array.from(tag.proyectos).filter(Boolean).join(', ') || 'General';
+    const descArray = Array.from(tag.descriptions).filter(Boolean);
+    
+    // EL TEXTO DEL COMENTARIO CONSOLIDADO (Toda la información va dentro de esta única columna)
+    let comentarioConsolidado = '';
+    if (isComposite) {
+      const parts = tag.name.split(':');
+      const categoria = parts[0].trim();
+      const subconcepto = parts.slice(1).join(':').trim();
+      
+      const descripcion = descArray.length > 0
+        ? descArray.join(' // ')
+        : `Se refiere al desarrollo y resolución técnica de ${subconcepto.replace(/_/g, ' ')} en ${categoria}.`;
+
+      comentarioConsolidado = `Descripción: ${descripcion} | Categoría: ${categoria} | Subconcepto: ${subconcepto} | Ocurrencias: ${tag.ocurrencias} | Proyectos: ${proyectosStr}`;
+    } else {
+      const descripcion = descArray.length > 0 ? descArray.join(' // ') : '';
+      if (descripcion) {
+        comentarioConsolidado = `Descripción: ${descripcion} | Categoría: ${tag.name} | Ocurrencias: ${tag.ocurrencias} | Proyectos: ${proyectosStr}`;
+      } else {
+        comentarioConsolidado = `Etiqueta base: ${tag.name} | Ocurrencias: ${tag.ocurrencias} | Proyectos: ${proyectosStr}`;
+      }
+    }
+
+    // LA LÍNEA FINAL PARA EL CSV (SOLO DOS VALORES SEPARADOS POR ;)
+    const code = cleanField(tag.name);
+    const comment = cleanField(comentarioConsolidado);
+    const lineaCsv = `${code};${comment}`;
+
+    csvLines.push(lineaCsv);
+  });
+
+  // 5. Generar archivo descargable con BOM UTF-8 (\uFEFF)
+  const csvContent = '\uFEFF' + csvLines.join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+

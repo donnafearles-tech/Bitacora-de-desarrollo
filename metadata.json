@@ -1,6 +1,6 @@
 {
   "name": "DevLog Pro - Bitácora de Desarrollo",
-  "description": "Bitácora técnica de actividad diaria para programadores y desarrolladores de software con análisis de productividad, etiquetas, capturas de pantalla, exportación y resúmenes con IA.",
+  "description": "Bitácora técnica para desarrolladores con generación de códigos compuestos mediante IA (Kimi), exportación de Libro de Códigos para Atlas.ti, métricas de productividad, etiquetas y persistencia sincronizada.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

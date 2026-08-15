@@ -435,7 +435,7 @@ function generateFallbackSummary(entries: LogEntry[]): AISummaryResponse {
 }
 
 // -------------------------------------------------------------
-// 3. GENERATE SUMMARY HEADLINE FROM ACTIVITIES & CODE (KIMI K3)
+// 3. GENERATE CONDENSED SUMMARY HEADLINE (KIMI K3 / AI SYNTHESIS)
 // -------------------------------------------------------------
 export async function generateSummaryHeadline(
   activities: string,
@@ -451,42 +451,47 @@ export async function generateSummaryHeadline(
 
   const aiConfig = getAIConfig();
 
-  const formattedContext = `PROYECTO: ${project || 'General'}
-ESTADO / MOOD: ${mood || 'productive'}
-TAGS: ${(tags || []).join(', ') || 'dev'}
+  const formattedContext = `PROYECTO / MÓDULO: ${project || 'General'}
+ESTADO / ENFOQUE: ${mood || 'productive'}
+TECNOLOGÍAS / TAGS: ${(tags || []).join(', ') || 'ingeniería_software'}
 
-ACTIVIDADES Y CÓDIGO (MARKDOWN):
+ACTIVIDADES Y CÓDIGO REGISTRADOS:
 ${activities}
 
-${obstacles && obstacles.trim().length > 0 ? `OBSTÁCULOS / ERRORES ENFRENTADOS:\n${obstacles}\n` : ''}
-${solutions && solutions.trim().length > 0 ? `SOLUCIONES APLICADAS:\n${solutions}\n` : ''}`;
+${obstacles && obstacles.trim().length > 0 ? `OBSTÁCULOS / ERRORES DETECTADOS:\n${obstacles}\n` : ''}
+${solutions && solutions.trim().length > 0 ? `SOLUCIONES TÉCNICAS APLICADAS:\n${solutions}\n` : ''}`;
 
   // --- PATH A: KIMI K3 (MOONSHOT AI) ---
   if (aiConfig.provider === 'kimi') {
     try {
-      const systemPrompt = `Eres un Staff Software Engineer y Tech Lead de élite.
-Tu objetivo es formular un ENCABEZADO / TITULAR TÉCNICO PROFESIONAL (máximo 6 a 14 palabras) que represente con exactitud el problema técnico resuelto, el reto arquitectónico superado o la funcionalidad central implementada en la sesión de desarrollo.
+      const systemPrompt = `Eres un Staff Software Engineer y Tech Lead de nivel mundial.
+Tu objetivo es formular un SUMARIO TÉCNICO CONDENSADO DE ALTA DENSIDAD INFORMATIVA (máximo 6 a 12 palabras) que sintetice en un único titular descriptivo el reto técnico, la tecnología implicada y la solución o funcionalidad desarrollada.
 
-REGLAS ESTRICTAS:
-1. NO copies las primeras líneas del texto, ni tomes títulos genéricos como "Tareas Realizadas", "Notas de desarrollo", "Avances", etc.
-2. Analiza a fondo los fragmentos de código, los nombres de librerías, los errores reportados y las soluciones aplicadas para entender qué se construyó o arregló realmente.
-3. Redacta un titular directo, descriptivo y técnico en español que cualquier Tech Lead o Senior Developer valoraría.
-4. Ejemplos de estilo esperado:
-   - "Resolución de condición de carrera en WebSockets y sincronización de estado"
-   - "Corrección de bucle infinito en interceptor Axios y rotación de tokens JWT"
-   - "Optimización de consultas SQL con índices compuestos y mitigación de N+1"
-   - "Implementación de pipeline CI/CD en GitHub Actions con Docker y escaneo SAST"
-   - "Depuración de fuga de memoria en Node.js mediante análisis de Heap Dumps"
-5. Responde ÚNICAMENTE con la frase del titular en texto plano. No agregues comillas, ni markdown, ni prefijos como "Titular:", "Resumen:" o "Encabezado:".`;
+REGLAS DE ORO OBLIGATORIAS:
+1. PROHIBIDO COPIAR EL PRIMER PÁRRAFO o usar frases literales del texto del desarrollador. No copies oraciones introductorias ni encabezados de plantilla como "Tareas Realizadas", "Avances", "Notas", etc.
+2. SINTETIZA aplicando la fórmula de ingeniería: [Acción técnica precisa en infinitivo o sustantivo de acción] + [Tecnología / Módulo específico] + [Problema resuelto o resultado concreto].
+3. CONDENSA la información técnica al máximo para que sea inmediatamente comprensible en un dashboard ejecutivo o bitácora de ingeniería.
+4. Ejemplos de sumarios esperados (alta densidad informativa):
+   - "Implementación de rotación de tokens JWT en Supabase Auth y mitigación de expiración"
+   - "Resolución de condición de carrera en WebSockets con colas asíncronas"
+   - "Optimización de consultas SQL con índices compuestos y eliminación de cuellos de botella"
+   - "Configuración de pipeline CI/CD en GitHub Actions con Docker y escaneo SAST"
+   - "Refactorización del estado global en React con Zustand para evitar re-renders"
+   - "Depuración de fuga de memoria en Node.js mediante análisis de Heap Snapshots"
+5. Responde ESTRICTAMENTE con el titular en texto plano limpio. No agregues comillas, ni markdown, ni prefijos como "Titular:", "Resumen:" o "Encabezado:".`;
 
-      const userPrompt = `Analiza la siguiente bitácora y genera el encabezado técnico adecuado al problema o tarea de fondo:\n\n${formattedContext}`;
+      const userPrompt = `Analiza la siguiente sesión técnica y genera el SUMARIO CONDENSADO Y DESCRIPTIVO:\n\n${formattedContext}`;
 
       const responseText = await callKimiAPI([
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
-      ], { temperature: 0.2 });
+      ], { temperature: 0.15 });
 
-      const cleaned = responseText.trim().replace(/^["'`]|["'`]$/g, '').replace(/^(Titular|Encabezado|Resumen|Headline|Título):\s*/i, '');
+      const cleaned = responseText
+        .trim()
+        .replace(/^["'`]|["'`]$/g, '')
+        .replace(/^(Titular|Encabezado|Resumen|Headline|Título|Sumario):\s*/i, '');
+
       if (cleaned.length > 5) {
         return cleaned;
       }
@@ -499,26 +504,32 @@ REGLAS ESTRICTAS:
   const gemini = getGeminiClient();
   if (gemini) {
     try {
-      const prompt = `Eres un Tech Lead de ingeniería de software. Formula un ENCABEZADO / TITULAR TÉCNICO ADECUADO AL PROBLEMA O TAREA CENTRAL (máximo 6 a 14 palabras).
+      const prompt = `Eres un Tech Lead de élite en ingeniería de software.
+Formula un SUMARIO TÉCNICO CONDENSADO DE ALTA DENSIDAD INFORMATIVA (máximo 6 a 12 palabras) que sintetice la sesión de código.
 
 REGLAS CRÍTICAS:
-- NO copies la primera línea ni encabezados repetitivos como "Tareas Realizadas".
-- Identifica la problemática real resuelta, el módulo afectado, o la tecnología intervenida según el código y las actividades.
-- Redacta el titular en español técnico, profesional y conciso.
-- Responde estrictamente con la frase limpia, sin comillas ni prefijos.
+- NUNCA copies el primer párrafo ni oraciones textuales del texto de entrada.
+- Sintetiza la acción clave: [Verbo/Acción de ingeniería] + [Tecnología/Módulo] + [Problema resuelto o logro técnico].
+- Debe ser directo, descriptivo y profesional.
+- Responde estrictamente con la frase limpia, sin comillas ni prefijos como "Titular:".
 
-Contexto de la sesión:
+Contexto técnico:
 ${formattedContext}`;
 
       const response = await gemini.models.generateContent({
         model: 'gemini-3.7-flash',
         contents: prompt,
         config: {
-          systemInstruction: 'Genera un encabezado técnico conciso (6-14 palabras) que describa la solución técnica o problema resuelto en la sesión.',
+          systemInstruction:
+            'Genera un sumario técnico condensado, informativo y conciso (6-12 palabras). Nunca copies el primer párrafo.',
         },
       });
 
-      const text = (response.text || '').trim().replace(/^["'`]|["'`]$/g, '').replace(/^(Titular|Encabezado|Resumen|Headline|Título):\s*/i, '');
+      const text = (response.text || '')
+        .trim()
+        .replace(/^["'`]|["'`]$/g, '')
+        .replace(/^(Titular|Encabezado|Resumen|Headline|Título|Sumario):\s*/i, '');
+
       if (text.length > 5) {
         return text;
       }
@@ -527,52 +538,254 @@ ${formattedContext}`;
     }
   }
 
-  // --- PATH C: LOCAL HEURISTIC FALLBACK (SMART PROBLEM EXTRACTOR) ---
-  const combinedText = `${activities} ${obstacles || ''} ${solutions || ''}`.toLowerCase();
+  // --- PATH C: LOCAL SMART SYNTHESIZER (INFORMATION-DENSE CONDENSED FALLBACK) ---
+  const fullText = `${activities} ${obstacles || ''} ${solutions || ''}`.toLowerCase();
+  const projName = project && project.toLowerCase() !== 'general' ? project : 'módulo principal';
 
-  // Detect technical keywords & patterns
-  const detectedIssues: string[] = [];
-  if (combinedText.includes('memory leak') || combinedText.includes('fuga de memoria')) detectedIssues.push('fuga de memoria');
-  if (combinedText.includes('cors') || combinedText.includes('origin')) detectedIssues.push('políticas CORS');
-  if (combinedText.includes('jwt') || combinedText.includes('auth') || combinedText.includes('oauth') || combinedText.includes('token')) detectedIssues.push('autenticación y tokens');
-  if (combinedText.includes('sql') || combinedText.includes('query') || combinedText.includes('postgres') || combinedText.includes('database')) detectedIssues.push('consultas y base de datos');
-  if (combinedText.includes('docker') || combinedText.includes('container') || combinedText.includes('k8s')) detectedIssues.push('contenedores y despliegue');
-  if (combinedText.includes('websocket') || combinedText.includes('socket') || combinedText.includes('sse')) detectedIssues.push('comunicación en tiempo real');
-  if (combinedText.includes('cache') || combinedText.includes('redis')) detectedIssues.push('estrategia de cache y rendimiento');
-  if (combinedText.includes('test') || combinedText.includes('jest') || combinedText.includes('pytest')) detectedIssues.push('cobertura de pruebas unitarias');
-  if (combinedText.includes('refactor') || combinedText.includes('limpieza') || combinedText.includes('modular')) detectedIssues.push('refactorización de arquitectura');
+  // 1. Technical Action detection
+  let action = 'Desarrollo e integración';
+  if (fullText.includes('fix') || fullText.includes('correg') || fullText.includes('resolv') || fullText.includes('solucion') || fullText.includes('bug')) {
+    action = 'Resolución y depuración';
+  } else if (fullText.includes('optimiz') || fullText.includes('rendimiento') || fullText.includes('performance') || fullText.includes('latencia')) {
+    action = 'Optimización de rendimiento';
+  } else if (fullText.includes('refactor') || fullText.includes('limpieza') || fullText.includes('modular')) {
+    action = 'Refactorización arquitectónica';
+  } else if (fullText.includes('auth') || fullText.includes('login') || fullText.includes('jwt') || fullText.includes('permis')) {
+    action = 'Implementación de seguridad y autenticación';
+  } else if (fullText.includes('deploy') || fullText.includes('docker') || fullText.includes('ci/cd') || fullText.includes('cloud')) {
+    action = 'Configuración de despliegue e infraestructura';
+  } else if (fullText.includes('api') || fullText.includes('endpoint') || fullText.includes('backend') || fullText.includes('rest')) {
+    action = 'Construcción de servicios backend y endpoints';
+  } else if (fullText.includes('ui') || fullText.includes('component') || fullText.includes('layout') || fullText.includes('react')) {
+    action = 'Diseño e integración de componentes reactivos';
+  }
 
-  if (obstacles && obstacles.trim().length > 10) {
-    const cleanObs = obstacles.replace(/^[#\-\*\s]+/, '').trim().split('\n')[0];
-    if (cleanObs.length > 10) {
-      return `Resolución de obstáculo: ${cleanObs.length > 55 ? cleanObs.slice(0, 52) + '...' : cleanObs}`;
+  // 2. Core Domain/Topic detection
+  const topics: string[] = [];
+  if (fullText.includes('supabase') || fullText.includes('postgres') || fullText.includes('sql') || fullText.includes('database') || fullText.includes('tabla')) topics.push('base de datos relacional');
+  if (fullText.includes('jwt') || fullText.includes('token') || fullText.includes('session') || fullText.includes('auth')) topics.push('gestión de sesiones JWT');
+  if (fullText.includes('memory') || fullText.includes('fuga') || fullText.includes('leak')) topics.push('mitigación de fuga de memoria');
+  if (fullText.includes('cors') || fullText.includes('origin') || fullText.includes('headers')) topics.push('políticas CORS y cabeceras');
+  if (fullText.includes('websocket') || fullText.includes('socket') || fullText.includes('realtime') || fullText.includes('sse')) topics.push('sincronización en tiempo real');
+  if (fullText.includes('cache') || fullText.includes('redis')) topics.push('estrategia de caché distribuida');
+  if (fullText.includes('test') || fullText.includes('jest') || fullText.includes('mock')) topics.push('cobertura de pruebas unitarias');
+  if (fullText.includes('docker') || fullText.includes('container') || fullText.includes('k8s')) topics.push('contenedores Docker');
+  if (fullText.includes('atlas') || fullText.includes('etiqueta') || fullText.includes('taxonom')) topics.push('codificación cualitativa y taxonomía');
+
+  // 3. Synthesize condensed phrase (Never copy a raw line)
+  if (topics.length > 0) {
+    return `${action} de ${topics.slice(0, 2).join(' y ')} en ${projName}`;
+  }
+
+  if (tags && tags.length > 0 && tags[0] !== 'dev') {
+    const cleanTags = tags.filter(t => t !== 'dev').slice(0, 3).join(', ');
+    return `${action} técnica con stack ${cleanTags} en ${projName}`;
+  }
+
+  return `${action} técnica y sincronización en ${projName}`;
+}
+
+// -------------------------------------------------------------
+// 4. GENERATE COMPOSITE CODE FOR ATLAS.TI (KIMI K3 / AI TAXONOMY)
+// -------------------------------------------------------------
+export async function generateCompositeCode(
+  baseTag: string,
+  content: string,
+  project?: string
+): Promise<{
+  compositeCode: string;
+  deducedKeyword: string;
+  baseTag: string;
+  description: string;
+}> {
+  const cleanBase = (baseTag || 'Dev').trim().replace(/^[#:]+|[:#]+$/g, '');
+  const cleanContent = (content || '').trim();
+
+  if (!cleanContent) {
+    const defaultKeyword = 'desarrollo_general';
+    return {
+      compositeCode: `${cleanBase}: ${defaultKeyword}`,
+      deducedKeyword: defaultKeyword,
+      baseTag: cleanBase,
+      description: `Actividades generales de desarrollo y mantenimiento en ${cleanBase}.`,
+    };
+  }
+
+  const aiConfig = getAIConfig();
+
+  // --- PATH A: KIMI K3 (MOONSHOT AI) ---
+  if (aiConfig.provider === 'kimi') {
+    try {
+      const systemPrompt = `Eres un especialista en análisis cualitativo, taxonomía de software y codificación temática para Atlas.ti.
+Tu objetivo es analizar un registro de actividad o fragmento de código de un desarrollador, deducir un código compuesto temático preciso y generar una breve descripción analítica o definición contextual.
+
+REGLAS ESTRICTAS:
+1. Recibirás una ETIQUETA_BASE (ej: "Python", "React", "Bug", "SQL", "DevOps", "TypeScript") y el CONTENIDO técnico del registro.
+2. DEDUCE una palabra clave o subconcepto específico (1 a 3 palabras en minúsculas, usando formato snake_case o palabras separadas por guión bajo/espacio).
+   Ejemplos de deducción:
+   - Base "TypeScript" + texto sobre configuración de linters o scripts -> subconcepto: "tareas" o "configuracion_linter"
+   - Base "React" + texto sobre CORS o headers de red -> subconcepto: "politica_cors"
+   - Base "Python" + texto de resolver bucle infinito -> subconcepto: "correccion_bucles"
+   - Base "Bug" + texto de fuga de memoria -> subconcepto: "fuga_memoria"
+3. GENERA UNA DESCRIPCIÓN ANALÍTICA O DEFINICIÓN de 1 a 2 oraciones (máximo 150 caracteres) explicando el contexto en el que se usó este tag dentro del contenido de la entrada de la bitácora.
+   Ejemplo: "Se refiere a la configuración y resolución de problemas relacionados con tareas automatizadas y linters en el entorno de desarrollo."
+4. Responde OBLIGATORIAMENTE en formato JSON válido con la siguiente estructura:
+{
+  "baseTag": "${cleanBase}",
+  "deducedKeyword": "palabra_clave_deducida",
+  "compositeCode": "${cleanBase}: palabra_clave_deducida",
+  "description": "Breve descripción analítica contextual (máximo 150 caracteres)."
+}`;
+
+      const userPrompt = `ETIQUETA_BASE: ${cleanBase}
+PROYECTO: ${project || 'General'}
+
+CONTENIDO DEL REGISTRO:
+${cleanContent}
+
+Genera el código compuesto y la descripción analítica en JSON:`;
+
+      const responseText = await callKimiAPI(
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        { temperature: 0.2 }
+      );
+
+      const parsed = extractJSONFromText(responseText);
+      if (parsed && (parsed.compositeCode || parsed.deducedKeyword)) {
+        const deduced = (parsed.deducedKeyword || '')
+          .trim()
+          .replace(/\s+/g, '_')
+          .toLowerCase();
+        const base = (parsed.baseTag || cleanBase).trim();
+        const compCode = parsed.compositeCode
+          ? parsed.compositeCode.trim()
+          : `${base}: ${deduced}`;
+        const desc = (parsed.description || '').trim() ||
+          `Se refiere al desarrollo y resolución técnica de ${deduced.replace(/_/g, ' ')} en el entorno de ${base}.`;
+
+        return {
+          compositeCode: compCode,
+          deducedKeyword: deduced,
+          baseTag: base,
+          description: desc.slice(0, 200),
+        };
+      }
+
+      // Fallback text parsing if raw text was returned instead of clean JSON
+      const cleaned = responseText
+        .trim()
+        .replace(/^["'`]|["'`]$/g, '')
+        .replace(/^(Código|Code|Tag|Resultado):\s*/i, '');
+
+      if (cleaned.includes(':')) {
+        const parts = cleaned.split(':');
+        const deduced = parts.slice(1).join(':').trim().replace(/\s+/g, '_').toLowerCase();
+        const base = parts[0].trim();
+        return {
+          compositeCode: `${base}: ${deduced}`,
+          deducedKeyword: deduced,
+          baseTag: base,
+          description: `Se refiere al desarrollo y resolución técnica sobre ${deduced.replace(/_/g, ' ')} en ${base}.`,
+        };
+      } else if (cleaned.length > 0) {
+        const deduced = cleaned.trim().replace(/\s+/g, '_').toLowerCase();
+        return {
+          compositeCode: `${cleanBase}: ${deduced}`,
+          deducedKeyword: deduced,
+          baseTag: cleanBase,
+          description: `Se refiere al desarrollo y resolución técnica sobre ${deduced.replace(/_/g, ' ')} en ${cleanBase}.`,
+        };
+      }
+    } catch (err: any) {
+      console.warn('Kimi composite code generator error, falling back to Gemini:', err);
     }
   }
 
-  if (detectedIssues.length > 0) {
-    return `Optimización y resolución de ${detectedIssues.slice(0, 2).join(' y ')} en ${project || 'módulo central'}`;
+  // --- PATH B: GEMINI 3.7 FLASH ---
+  const gemini = getGeminiClient();
+  if (gemini) {
+    try {
+      const prompt = `Analiza este registro de desarrollo con la etiqueta base "${cleanBase}":
+${cleanContent}
+
+1. Deduce una palabra clave o subconcepto principal específico (1 a 3 palabras en formato snake_case o texto breve).
+2. Genera una breve descripción analítica o definición de 1 a 2 oraciones (máximo 150 caracteres) explicando el contexto en el que se usó este tag dentro de la bitácora.
+
+Responde en formato JSON con la siguiente estructura:
+{
+  "baseTag": "${cleanBase}",
+  "deducedKeyword": "palabra_clave_deducida",
+  "compositeCode": "${cleanBase}: palabra_clave_deducida",
+  "description": "Breve descripción analítica contextual de 1-2 oraciones (máx 150 caracteres)"
+}`;
+
+      const response = await gemini.models.generateContent({
+        model: 'gemini-3.7-flash',
+        contents: prompt,
+        config: {
+          systemInstruction:
+            'Eres un experto en codificación temática y taxonomía de software para Atlas.ti. Deduce un subconcepto técnico preciso de 1 a 3 palabras y una descripción analítica contextual concisa.',
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              baseTag: { type: Type.STRING },
+              deducedKeyword: { type: Type.STRING },
+              compositeCode: { type: Type.STRING },
+              description: { type: Type.STRING },
+            },
+            required: ['baseTag', 'deducedKeyword', 'compositeCode', 'description'],
+          },
+        },
+      });
+
+      const parsed = extractJSONFromText(response.text || '{}');
+      if (parsed && parsed.deducedKeyword) {
+        const cleanDed = parsed.deducedKeyword.trim().replace(/\s+/g, '_').toLowerCase();
+        const desc = (parsed.description || '').trim() ||
+          `Se refiere al trabajo y solución de problemas sobre ${cleanDed.replace(/_/g, ' ')} en ${cleanBase}.`;
+        return {
+          compositeCode: `${cleanBase}: ${cleanDed}`,
+          deducedKeyword: cleanDed,
+          baseTag: cleanBase,
+          description: desc.slice(0, 200),
+        };
+      }
+    } catch (geminiErr: any) {
+      console.error('Error generating composite code with Gemini:', geminiErr);
+    }
   }
 
-  // Strip template lines & search for the first real technical description
-  const candidateLines = activities
-    .split('\n')
-    .map(l => l.trim().replace(/^[#\-\*\s\[\]x]+/, '').trim())
-    .filter(l => {
-      const lower = l.toLowerCase();
-      return (
-        l.length > 10 &&
-        !lower.startsWith('tareas realizadas') &&
-        !lower.startsWith('fragmento de código') &&
-        !lower.startsWith('describe tus') &&
-        !lower.includes('```')
-      );
-    });
+  // --- PATH C: OFFLINE HEURISTIC DEDUCTION ---
+  const lower = cleanContent.toLowerCase();
+  let deduced = 'actividad_tecnica';
 
-  if (candidateLines.length > 0) {
-    const firstMeaningful = candidateLines[0];
-    return firstMeaningful.length > 65 ? `${firstMeaningful.slice(0, 62)}...` : firstMeaningful;
+  if (lower.includes('loop') || lower.includes('bucle')) deduced = 'correccion_bucles';
+  else if (lower.includes('leak') || lower.includes('memoria')) deduced = 'fuga_memoria';
+  else if (lower.includes('render') || lower.includes('rerender')) deduced = 'optimizacion_renders';
+  else if (lower.includes('auth') || lower.includes('jwt') || lower.includes('login')) deduced = 'autenticacion_tokens';
+  else if (lower.includes('cors') || lower.includes('origin')) deduced = 'politica_cors';
+  else if (lower.includes('query') || lower.includes('consulta') || lower.includes('sql')) deduced = 'optimizacion_queries';
+  else if (lower.includes('test') || lower.includes('prueba')) deduced = 'cobertura_tests';
+  else if (lower.includes('deploy') || lower.includes('docker') || lower.includes('ci/cd')) deduced = 'despliegue_contenedores';
+  else if (lower.includes('refactor') || lower.includes('limpieza')) deduced = 'refactorizacion_codigo';
+  else if (lower.includes('endpoint') || lower.includes('api') || lower.includes('route')) deduced = 'creacion_endpoints';
+  else if (lower.includes('task') || lower.includes('tarea') || lower.includes('linter')) deduced = 'tareas';
+  else {
+    const firstWord = cleanContent.split(/\s+/).find(w => w.length > 4 && !['sobre', 'desde', 'hacia', 'donde', 'cuando'].includes(w.toLowerCase()));
+    if (firstWord) deduced = firstWord.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
   }
 
-  return `Desarrollo y resolución técnica en ${project || 'módulo principal'}`;
+  const cleanDedHuman = deduced.replace(/_/g, ' ');
+  return {
+    compositeCode: `${cleanBase}: ${deduced}`,
+    deducedKeyword: deduced,
+    baseTag: cleanBase,
+    description: `Se refiere a la implementación y resolución técnica de ${cleanDedHuman} en el entorno de ${cleanBase}.`,
+  };
 }
+
 

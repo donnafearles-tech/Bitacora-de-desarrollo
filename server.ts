@@ -3,8 +3,9 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { Storage } from './server/storage';
-import { generateWeeklySummary, solveErrorWithAI, generateSummaryHeadline, getAIConfig } from './server/ai';
+import { generateWeeklySummary, solveErrorWithAI, generateSummaryHeadline, generateCompositeCode, getAIConfig } from './server/ai';
 import { getSupabaseConfig } from './server/supabase';
+import { getServiceAccountCredentials, testSheetsConnection, syncDevLogsToSheet } from './server/sheets';
 
 async function startServer() {
   const app = express();
@@ -35,14 +36,32 @@ async function startServer() {
     });
   });
 
-  // Supabase Database Connection Status
-  app.get('/api/supabase/status', (req, res) => {
+  // Supabase Database Connection Status & Diagnostics
+  app.get('/api/supabase/status', async (req, res) => {
     const config = getSupabaseConfig();
+    const entries = await Storage.getAllAsync();
     res.json({
       isConfigured: config.isConfigured,
-      url: config.url ? `${config.url.slice(0, 20)}...` : undefined,
+      url: config.maskedUrl,
       hasKey: config.hasKey,
+      keyPreview: config.maskedKey,
+      entriesFound: entries.length,
+      tablesChecked: ['devlog_entries', 'bitacora_entries', 'bitacora', 'entries', 'logs'],
     });
+  });
+
+  // Force Resync from Supabase
+  app.post('/api/supabase/resync', async (req, res) => {
+    try {
+      const entries = await Storage.getAllAsync();
+      res.json({
+        success: true,
+        count: entries.length,
+        message: `Sincronización completada. Se obtuvieron ${entries.length} registros.`,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // AI Engine Info
@@ -188,6 +207,25 @@ async function startServer() {
     }
   });
 
+  // AI Generate Composite Code for Atlas.ti
+  app.post('/api/ai/generate-code', async (req, res) => {
+    try {
+      const { baseTag, content, project } = req.body;
+      if (!baseTag) {
+        return res.status(400).json({ error: 'Se requiere la etiqueta base (baseTag).' });
+      }
+      const result = await generateCompositeCode(
+        baseTag,
+        content || '',
+        project
+      );
+      res.json(result);
+    } catch (err: any) {
+      console.error('Error generating composite code:', err);
+      res.status(500).json({ error: err.message || 'Error al generar el código compuesto con IA' });
+    }
+  });
+
   // Export JSON Backup
   app.get('/api/export/json', async (req, res) => {
     try {
@@ -217,6 +255,39 @@ async function startServer() {
       res.json({ success: true, count: entries.length });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Error al importar datos' });
+    }
+  });
+
+  // --- GOOGLE SHEETS SERVICE ACCOUNT INTEGRATION ---
+  app.get('/api/sheets/status', (req, res) => {
+    const creds = getServiceAccountCredentials();
+    res.json({
+      isConfigured: creds.isConfigured,
+      clientEmail: creds.clientEmail,
+      projectId: creds.projectId,
+      defaultSpreadsheetId: process.env.GOOGLE_SHEETS_SPREADSHEET_ID || null,
+      error: creds.error,
+    });
+  });
+
+  app.post('/api/sheets/test', async (req, res) => {
+    try {
+      const { spreadsheetId } = req.body;
+      const result = await testSheetsConnection(spreadsheetId);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message || 'Error de conexión con Google Sheets' });
+    }
+  });
+
+  app.post('/api/sheets/sync', async (req, res) => {
+    try {
+      const { spreadsheetId } = req.body;
+      const entries = await Storage.getAllAsync();
+      const result = await syncDevLogsToSheet(entries, spreadsheetId);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message || 'Error al sincronizar con Google Sheets' });
     }
   });
 

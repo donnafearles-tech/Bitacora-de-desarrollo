@@ -166,15 +166,24 @@ export const EntryCard: React.FC<EntryCardProps> = ({
       {/* Tags */}
       {entry.tags && entry.tags.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 mb-3">
-          {entry.tags.map(t => (
-            <button
-              key={t}
-              onClick={() => onTagClick(t)}
-              className="text-[9px] bg-[#05060a] border border-[#1e293b] hover:border-blue-500/60 px-1.5 py-0.5 rounded text-slate-400 font-mono transition cursor-pointer"
-            >
-              #{t}
-            </button>
-          ))}
+          {entry.tags.map(t => {
+            const isComposite = t.includes(':');
+            return (
+              <button
+                key={t}
+                onClick={() => onTagClick(t)}
+                className={`text-[9px] px-1.5 py-0.5 rounded font-mono transition cursor-pointer ${
+                  isComposite
+                    ? 'bg-purple-950/60 border border-purple-800/60 hover:border-purple-500 text-purple-300 shadow-[0_0_6px_rgba(168,85,247,0.15)] font-semibold'
+                    : 'bg-[#05060a] border border-[#1e293b] hover:border-blue-500/60 text-slate-400'
+                }`}
+                title={isComposite ? 'Código compuesto Atlas.ti (filtrar)' : 'Tag de bitácora (filtrar)'}
+              >
+                {isComposite ? '🏷️ ' : '#'}
+                {t}
+              </button>
+            );
+          })}
         </div>
       )}
 

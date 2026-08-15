@@ -8,6 +8,7 @@ export interface LogEntry {
   solutions: string;
   plan: string;
   tags: string[];
+  tagDescriptions?: Record<string, string>; // tag -> analytical description from Kimi / IA
   image?: string; // base64 or url
   timeSpentHours: number;
   mood?: 'flow' | 'productive' | 'blocked' | 'learning' | 'refactor';
