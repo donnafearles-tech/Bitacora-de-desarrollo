@@ -24,6 +24,7 @@ import { ProductivityStatsModal } from './components/ProductivityStatsModal';
 import { AISummaryModal } from './components/AISummaryModal';
 import { AISolveErrorModal } from './components/AISolveErrorModal';
 import { ExportModal } from './components/ExportModal';
+import { NewProjectModal } from './components/NewProjectModal';
 import { LogEntry, ProductivityStats, AISummaryResponse, AISolveErrorResponse } from './types';
 import { getTodayLocalDateString } from './utils/date';
 
@@ -33,10 +34,13 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [theme, setTheme] = useState<'dark' | 'light' | 'hacker'>('dark');
 
+  // Active Project & Custom Projects State
+  const [activeProject, setActiveProject] = useState<string>('General');
+  const [customProjects, setCustomProjects] = useState<string[]>([]);
+
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
-  const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [filterOption, setFilterOption] = useState<'all' | 'week' | 'month' | 'obstacles' | 'images'>('all');
 
   // Modal States
@@ -48,6 +52,7 @@ export default function App() {
   const [bugSolverInitialText, setBugSolverInitialText] = useState('');
   const [bugSolverInitialContext, setBugSolverInitialContext] = useState('');
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [isNewProjectOpen, setIsNewProjectOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Show temporary toast notification
@@ -186,14 +191,29 @@ export default function App() {
       .sort((a, b) => b.count - a.count);
   }, [entries]);
 
-  // Compute available projects
+  // Compute available projects ensuring "General" and custom projects are always included
   const availableProjects = useMemo(() => {
-    const set = new Set<string>();
+    const set = new Set<string>(['General', ...customProjects]);
     entries.forEach(e => {
-      if (e.project) set.add(e.project);
+      const p = (e.project || '').trim();
+      if (p) set.add(p);
     });
-    return Array.from(set).sort();
-  }, [entries]);
+    return Array.from(set).sort((a, b) => {
+      if (a === 'General') return -1;
+      if (b === 'General') return 1;
+      return a.localeCompare(b);
+    });
+  }, [entries, customProjects]);
+
+  const handleAddNewProject = (projectName: string) => {
+    const clean = projectName.trim();
+    if (!clean) return;
+    if (!customProjects.includes(clean)) {
+      setCustomProjects(prev => [...prev, clean]);
+    }
+    setActiveProject(clean);
+    showToast(`Proyecto activo: "${clean}"`);
+  };
 
   // Filter and Search logic
   const filteredEntries = useMemo(() => {
@@ -204,6 +224,14 @@ export default function App() {
     monthAgo.setDate(now.getDate() - 30);
 
     return entries.filter(entry => {
+      // 0. Active Project Filter
+      if (activeProject && activeProject !== '__ALL__') {
+        const entryProj = (entry.project || 'General').trim();
+        if (entryProj.toLowerCase() !== activeProject.toLowerCase()) {
+          return false;
+        }
+      }
+
       // 1. Text Search (title, activities, obstacles, solutions, plan, project, tags)
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -235,12 +263,7 @@ export default function App() {
         }
       }
 
-      // 3. Project Filter
-      if (selectedProject) {
-        if (entry.project !== selectedProject) return false;
-      }
-
-      // 4. Quick Option Filter
+      // 3. Quick Option Filter
       if (filterOption === 'week') {
         const entryDate = new Date(entry.date);
         if (entryDate < weekAgo) return false;
@@ -255,7 +278,7 @@ export default function App() {
 
       return true;
     });
-  }, [entries, searchQuery, selectedTag, selectedProject, filterOption]);
+  }, [entries, activeProject, searchQuery, selectedTag, filterOption]);
 
   const toggleTheme = () => {
     setTheme(prev => (prev === 'dark' ? 'light' : prev === 'light' ? 'hacker' : 'dark'));
@@ -288,6 +311,10 @@ export default function App() {
         }}
         onOpenExport={() => setIsExportOpen(true)}
         entriesCount={entries.length}
+        activeProject={activeProject}
+        availableProjects={availableProjects}
+        onChangeActiveProject={setActiveProject}
+        onOpenNewProjectModal={() => setIsNewProjectOpen(true)}
       />
 
       {/* Main Container */}
@@ -340,8 +367,8 @@ export default function App() {
           onSearchChange={setSearchQuery}
           selectedTag={selectedTag}
           onTagSelect={setSelectedTag}
-          selectedProject={selectedProject}
-          onProjectSelect={setSelectedProject}
+          selectedProject={activeProject === '__ALL__' ? null : activeProject}
+          onProjectSelect={proj => setActiveProject(proj || '__ALL__')}
           filterOption={filterOption}
           onFilterOptionChange={setFilterOption}
           availableTags={availableTags}
@@ -394,7 +421,7 @@ export default function App() {
               onClick={() => {
                 setSearchQuery('');
                 setSelectedTag(null);
-                setSelectedProject(null);
+                setActiveProject('__ALL__');
                 setFilterOption('all');
               }}
               className="px-3.5 py-1.5 rounded bg-[#111827] hover:bg-[#1e293b] border border-[#1e293b] text-slate-200 text-xs font-mono transition uppercase"
@@ -454,6 +481,7 @@ export default function App() {
         }}
         onSave={handleSaveEntry}
         initialEntry={editingEntry}
+        activeProject={activeProject}
         existingProjects={availableProjects}
         availableTags={availableTags}
         onOpenBugSolverWithText={handleOpenBugSolverWithText}
@@ -489,6 +517,14 @@ export default function App() {
         onClose={() => setIsExportOpen(false)}
         entries={entries}
         onImportJson={handleImportJson}
+      />
+
+      {/* 6. New Project Creation Modal */}
+      <NewProjectModal
+        isOpen={isNewProjectOpen}
+        onClose={() => setIsNewProjectOpen(false)}
+        onSave={handleAddNewProject}
+        existingProjects={availableProjects.filter(p => p !== 'General')}
       />
 
     </div>

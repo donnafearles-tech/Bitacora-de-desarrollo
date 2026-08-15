@@ -44,6 +44,7 @@ interface EntryFormModalProps {
   onClose: () => void;
   onSave: (entry: Partial<LogEntry> & { date: string; summary: string }) => Promise<void>;
   initialEntry?: LogEntry | null;
+  activeProject?: string;
   existingProjects: string[];
   availableTags?: { tag: string; count: number }[];
   onOpenBugSolverWithText?: (text: string) => void;
@@ -54,6 +55,7 @@ export const EntryFormModal: React.FC<EntryFormModalProps> = ({
   onClose,
   onSave,
   initialEntry,
+  activeProject,
   existingProjects,
   availableTags = [],
   onOpenBugSolverWithText,
@@ -122,7 +124,8 @@ export const EntryFormModal: React.FC<EntryFormModalProps> = ({
       // Reset to defaults with local browser date & AUTO-START LIVE TIMER
       setDate(getTodayLocalDateString());
       setSummary('');
-      setProject(existingProjects[0] || 'General');
+      const defaultProj = (activeProject && activeProject !== '__ALL__') ? activeProject : (existingProjects[0] || 'General');
+      setProject(defaultProj);
       setActivities('### Tareas Realizadas\n- \n\n```python\n# Fragmento de código clave\n```');
       setObstacles('');
       setSolutions('');
@@ -142,7 +145,7 @@ export const EntryFormModal: React.FC<EntryFormModalProps> = ({
     setIsTagDropdownOpen(false);
     setTagSearchQuery('');
     setErrorMsg(null);
-  }, [initialEntry, isOpen, existingProjects]);
+  }, [initialEntry, isOpen, existingProjects, activeProject]);
 
   // Web Audio API notification sound for Pomodoro completion
   const playNotificationSound = () => {

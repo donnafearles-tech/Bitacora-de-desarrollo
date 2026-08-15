@@ -12,6 +12,8 @@ import {
   Moon,
   Database,
   Globe,
+  FolderKanban,
+  FolderPlus,
 } from 'lucide-react';
 import { ProductivityStats } from '../types';
 import { getLocalTimeZoneName } from '../utils/date';
@@ -26,6 +28,10 @@ interface HeaderProps {
   onOpenBugSolver: () => void;
   onOpenExport: () => void;
   entriesCount: number;
+  activeProject: string;
+  availableProjects: string[];
+  onChangeActiveProject: (proj: string) => void;
+  onOpenNewProjectModal: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -38,6 +44,10 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenBugSolver,
   onOpenExport,
   entriesCount,
+  activeProject,
+  availableProjects,
+  onChangeActiveProject,
+  onOpenNewProjectModal,
 }) => {
   const [localTime, setLocalTime] = useState<string>('');
   const [dbProvider, setDbProvider] = useState<'supabase' | 'local_json'>('local_json');
@@ -76,23 +86,63 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           
-          {/* Logo & Subtitle */}
-          <div className="flex items-center space-x-3">
-            <div className="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center shadow-[0_0_10px_#2563eb] text-white">
-              <Terminal size={20} className="text-white animate-pulse" />
-            </div>
-            <div className="flex flex-col">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-black tracking-tighter leading-none text-white">
-                  DEVLOG_PRO
-                </span>
-                <span className="text-[10px] text-blue-400 font-mono tracking-widest bg-blue-950/60 px-1.5 py-0.5 rounded border border-blue-800/60">
-                  v3.1 // STABLE
+          {/* Logo & Project Selector */}
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center space-x-3">
+              <div className="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center shadow-[0_0_10px_#2563eb] text-white">
+                <Terminal size={20} className="text-white animate-pulse" />
+              </div>
+              <div className="flex flex-col">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-black tracking-tighter leading-none text-white">
+                    DEVLOG_PRO
+                  </span>
+                  <span className="text-[10px] text-blue-400 font-mono tracking-widest bg-blue-950/60 px-1.5 py-0.5 rounded border border-blue-800/60">
+                    v3.1 // STABLE
+                  </span>
+                </div>
+                <span className="text-[10px] text-slate-400 font-mono tracking-wider mt-0.5">
+                  ENGINEERING LOG BUFFER • METRICS & AI
                 </span>
               </div>
-              <span className="text-[10px] text-slate-400 font-mono tracking-wider mt-0.5">
-                ENGINEERING LOG BUFFER • METRICS & AI
-              </span>
+            </div>
+
+            {/* Active Workspace / Project Selector */}
+            <div className="flex items-center gap-1.5 bg-[#111827] px-2.5 py-1 rounded-md border border-blue-500/40 text-xs font-mono shadow-sm">
+              <FolderKanban size={14} className="text-blue-400 shrink-0" />
+              <div className="flex flex-col">
+                <span className="text-[9px] text-slate-400 uppercase tracking-wider leading-none">PROYECTO ACTIVO</span>
+                <select
+                  value={activeProject}
+                  onChange={e => {
+                    if (e.target.value === '__NEW_PROJECT__') {
+                      onOpenNewProjectModal();
+                    } else {
+                      onChangeActiveProject(e.target.value);
+                    }
+                  }}
+                  className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer pr-1 py-0.5 appearance-none hover:text-blue-300 transition"
+                  title="Cambiar proyecto activo para registrar y filtrar"
+                >
+                  <option value="__ALL__" className="bg-[#0b0f19] text-blue-300">🌐 [TODOS LOS PROYECTOS]</option>
+                  {availableProjects.map(p => (
+                    <option key={p} value={p} className="bg-[#0b0f19] text-white">
+                      📁 {p}
+                    </option>
+                  ))}
+                  <option value="__NEW_PROJECT__" className="bg-[#1e1b4b] text-purple-300 font-bold">
+                    ➕ Agregar nuevo proyecto...
+                  </option>
+                </select>
+              </div>
+              <button
+                type="button"
+                onClick={onOpenNewProjectModal}
+                className="p-1 text-slate-400 hover:text-blue-300 hover:bg-blue-950/50 rounded transition"
+                title="Crear nuevo proyecto..."
+              >
+                <FolderPlus size={13} />
+              </button>
             </div>
           </div>
 
